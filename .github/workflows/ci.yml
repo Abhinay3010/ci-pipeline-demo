@@ -1,4 +1,4 @@
-name: Full CI Pipeline
+name: Full CI Pipeline (Multi-Stage)
 
 on:
   push:
@@ -6,11 +6,16 @@ on:
   pull_request:
 
 jobs:
+
+  # --------------------------------------------------------
+  # 1️⃣ CODE BUILD STAGE
+  # --------------------------------------------------------
   build:
+    name: Stage 1 — Build & Test
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
+    - name: Checkout Source Code
       uses: actions/checkout@v4
 
     - name: Setup Java 17
@@ -31,19 +36,94 @@ jobs:
     - name: Maven Build
       run: mvn -B package
 
-    - name: SBOM using Syft
-      uses: anchore/actions/sbom@v1
+    - name: Upload Build Artifact (JAR)
+      uses: actions/upload-artifact@v4
       with:
-        path: .
+        name: app-jar
+        path: target/*.jar
+
+  # --------------------------------------------------------
+  # 2️⃣ SBOM GENERATION
+  # --------------------------------------------------------
+  sbom:
+    name: Stage 2 — Generate SBOM (Syft)
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+    - name: Checkout Source Code
+      uses: actions/checkout@v4
+
+    - name: Generate SBOM using Syft
+      uses: anchore/syft-action@v0.6.0
+      with:
         output-file: sbom.json
 
-    - name: Vulnerability Scan using Grype
-      uses: anchore/actions/scan@v1
+    - name: Upload SBOM
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom
+        path: sbom.json
+
+  # --------------------------------------------------------
+  # 3️⃣ VULNERABILITY SCAN USING GRYPE
+  # --------------------------------------------------------
+  grype:
+    name: Stage 3 — Vulnerability Scan (Grype)
+    runs-on: ubuntu-latest
+    needs: sbom
+
+    steps:
+    - name: Download SBOM
+      uses: actions/download-artifact@v4
+      with:
+        name: sbom
+
+    - name: Scan SBOM using Grype
+      uses: anchore/grype-action@v0.7.0
       with:
         sbom: sbom.json
 
+  # --------------------------------------------------------
+  # 4️⃣ DOCKER BUILD STAGE
+  # --------------------------------------------------------
+  docker_build:
+    name: Stage 4 — Build Docker Image
+    runs-on: ubuntu-latest
+    needs: grype
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
     - name: Build Docker Image
       run: docker build -t demo-app:latest .
+
+    - name: Save Docker Image as TAR
+      run: docker save demo-app:latest -o demo-app.tar
+
+    - name: Upload Docker TAR
+      uses: actions/upload-artifact@v4
+      with:
+        name: docker-image
+        path: demo-app.tar
+
+  # --------------------------------------------------------
+  # 5️⃣ DOCKER TRIVY SCAN
+  # --------------------------------------------------------
+  trivy:
+    name: Stage 5 — Trivy Image Scan
+    runs-on: ubuntu-latest
+    needs: docker_build
+
+    steps:
+    - name: Download Docker Image TAR
+      uses: actions/download-artifact@v4
+      with:
+        name: docker-image
+
+    - name: Load Docker Image
+      run: docker load -i demo-app.tar
 
     - name: Trivy Image Scan
       uses: aquasecurity/trivy-action@master
@@ -51,10 +131,16 @@ jobs:
         image-ref: demo-app:latest
         exit-code: 0
 
-    - name: Dummy Upload to Artifactory
-      run: |
-        echo "Simulating upload to Artifactory..."
-        echo "Build completed successfully!"
+  # --------------------------------------------------------
+  # 6️⃣ DUMMY ARTIFACTORY UPLOAD
+  # --------------------------------------------------------
+  upload:
+    name: Stage 6 — Dummy Upload to Artifactory
+    runs-on: ubuntu-latest
+    needs: trivy
 
-        echo "Simulating upload to Artifactory..."
-        echo "Build completed successfully!"
+    steps:
+    - name: Final Stage - Simulated Upload
+      run: |
+        echo "Uploading build to Artifactory (simulated)..."
+        echo "Pipeline Completed Successfully 🎉"
