@@ -32,12 +32,13 @@ jobs:
       run: mvn -B package
 
     - name: SBOM using Syft
-      uses: anchore/syft-action@v0.15.0
+      uses: anchore/actions/sbom@v1
       with:
+        path: .
         output-file: sbom.json
 
     - name: Vulnerability Scan using Grype
-      uses: anchore/grype-action@v1
+      uses: anchore/actions/scan@v1
       with:
         sbom: sbom.json
 
@@ -52,5 +53,8 @@ jobs:
 
     - name: Dummy Upload to Artifactory
       run: |
+        echo "Simulating upload to Artifactory..."
+        echo "Build completed successfully!"
+
         echo "Simulating upload to Artifactory..."
         echo "Build completed successfully!"
